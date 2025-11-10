@@ -32,10 +32,11 @@ python bench_llm.py --models <model_id_1>,... [--scoring-model <scoring_model_id
 
 ### Example
 
-Using the provided `prompts.jsonl` file and benchmarking the `google/gemini-1.5-flash` and `anthropic/claude-3.5-sonnet` models, while specifying `mistralai/mistral-nemo-2407` as the scoring model:
+
+Using the provided `prompts.jsonl` file and benchmarking the `google/gemini-2.5-flash-lite` and `openai/gpt-oss-120b` models, the command would be:
 
 ```bash
-python bench_llm.py --models "google/gemini-1.5-flash,anthropic/claude-3.5-sonnet" --scoring-model "mistralai/mistral-nemo-2407" prompts.jsonl
+python bench_llm.py --models "google/gemini-2.5-flash-lite,openai/gpt-oss-120b" prompts.jsonl
 ```
 
 If the `--scoring-model` flag is omitted, it will default to `openai/gpt-oss-120b`.

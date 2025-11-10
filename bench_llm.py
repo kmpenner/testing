@@ -9,7 +9,7 @@ and uses a secondary, low-cost model as an "LLM-as-a-Judge" to score the
 responses.
 
 Execution:
-    python bench_llm.py --models <model1>,<model2> < prompts.jsonl
+    python bench_llm.py --models <model1>,<model2> prompts.jsonl
 """
 
 import os
@@ -22,7 +22,7 @@ import requests
 
 # --- Constants ---
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-SCORING_MODEL = "mistralai/mistral-nemo-2407"
+SCORING_MODEL = "openai/gpt-oss-120b"
 # Floor value to prevent math errors with log(0) for time or cost
 LOG_FLOOR = 1e-6
 # Your website or app URL to identify requests
@@ -97,6 +97,11 @@ def main():
         required=True,
         help="A comma-separated list of target model IDs to benchmark."
     )
+    parser.add_argument(
+        "prompts_file",
+        type=str,
+        help="Path to the JSONL file containing the prompts."
+    )
     args = parser.parse_args()
     target_models = [model.strip() for model in args.models.split(',')]
 
@@ -108,92 +113,101 @@ def main():
     all_results = []
     raw_responses_by_prompt = {}
 
-    # 1. Iterate through prompts from stdin
-    for line in sys.stdin:
-        try:
-            prompt_data = json.loads(line)
-            prompt_id = prompt_data["id"]
-            prompt_text = prompt_data["prompt"]
-            scoring_rubric = prompt_data["scoring_rubric"]
-            max_tokens = prompt_data.get("max_tokens", 2048)
-        except json.JSONDecodeError:
-            print(f"Warning: Skipping malformed JSON line: {line.strip()}", file=sys.stderr)
-            continue
+    # 1. Iterate through prompts from the specified file
+    try:
+        with open(args.prompts_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    prompt_data = json.loads(line)
+                    prompt_id = prompt_data["id"]
+                    prompt_text = prompt_data["prompt"]
+                    scoring_rubric = prompt_data["scoring_rubric"]
+                    max_tokens = prompt_data.get("max_tokens", 2048)
+                except json.JSONDecodeError:
+                    print(f"Warning: Skipping malformed JSON line: {line.strip()}", file=sys.stderr)
+                    continue
 
-        print(f"Processing Prompt ID: {prompt_id}", file=sys.stderr)
-        raw_responses_by_prompt[prompt_id] = []
-        model_responses = []
+                print(f"Processing Prompt ID: {prompt_id}", file=sys.stderr)
+                raw_responses_by_prompt[prompt_id] = []
+                model_responses = []
 
-        # 2. Benchmark Phase: Get responses from target models
-        for model in target_models:
-            print(f"  - Benchmarking model: {model}", file=sys.stderr)
-            messages = [{"role": "user", "content": prompt_text}]
-            response_text, t_model, c_model = call_openrouter_api(model, messages, max_tokens)
-            model_responses.append({
-                "model": model,
-                "response_text": response_text,
-                "t_model": t_model,
-                "c_model": c_model
-            })
-            raw_responses_by_prompt[prompt_id].append(
-                f"[MODEL: {model}]\n{response_text}\n"
-            )
-
-        # 3. Scoring Phase: Use LLM-as-a-Judge
-        for response in model_responses:
-            print(f"  - Scoring response from: {response['model']}", file=sys.stderr)
-
-            # Construct the detailed prompt for the scoring model
-            scoring_prompt_messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an expert evaluator. Your task is to score a model's "
-                        "response based on a given rubric. You must return ONLY the "
-                        "final numerical score and nothing else."
+                # 2. Benchmark Phase: Get responses from target models
+                for model in target_models:
+                    print(f"  - Benchmarking model: {model}", file=sys.stderr)
+                    messages = [{"role": "user", "content": prompt_text}]
+                    response_text, t_model, c_model = call_openrouter_api(model, messages, max_tokens)
+                    model_responses.append({
+                        "model": model,
+                        "response_text": response_text,
+                        "t_model": t_model,
+                        "c_model": c_model
+                    })
+                    raw_responses_by_prompt[prompt_id].append(
+                        f"[MODEL: {model}]\n{response_text}\n"
                     )
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"**Original Prompt:**\n{prompt_text}\n\n"
-                        f"**Scoring Rubric:**\n{scoring_rubric}\n\n"
-                        f"**Model's Response to Evaluate:**\n{response['response_text']}\n\n"
-                        "------\n"
-                        "Based on the rubric, what is the numerical score for the model's response?"
-                    )
-                }
-            ]
 
-            score_text, _, c_score = call_openrouter_api(SCORING_MODEL, scoring_prompt_messages, 10)
+                # 3. Scoring Phase: Use LLM-as-a-Judge
+                for response in model_responses:
+                    print(f"  - Scoring response from: {response['model']}", file=sys.stderr)
 
-            # Extract and validate the score
-            try:
-                s_model = int(float(score_text))
-            except (ValueError, TypeError):
-                print(f"    Warning: Could not parse score '{score_text}'. Defaulting to 0.", file=sys.stderr)
-                s_model = 0
+                    # Construct the detailed prompt for the scoring model
+                    scoring_prompt_messages = [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are an expert evaluator. Your task is to score a model's "
+                                "response based on a given rubric. You must return ONLY the "
+                                "final numerical score and nothing else."
+                            )
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"**Original Prompt:**\n{prompt_text}\n\n"
+                                f"**Scoring Rubric:**\n{scoring_rubric}\n\n"
+                                f"**Model's Response to Evaluate:**\n{response['response_text']}\n\n"
+                                "------\n"
+                                "Based on the rubric, what is the numerical score for the model's response?"
+                            )
+                        }
+                    ]
 
-            # 4. Calculate Final Metrics
-            t_model = response["t_model"]
-            c_total = response["c_model"] + c_score
+                    score_text, _, c_score = call_openrouter_api(SCORING_MODEL, scoring_prompt_messages, 10)
 
-            # Use floor values to prevent log(<=0)
-            safe_t_model = max(t_model, LOG_FLOOR)
-            safe_c_total = max(c_total, LOG_FLOOR)
+                    # Extract and validate the score
+                    try:
+                        s_model = int(float(score_text))
+                    except (ValueError, TypeError):
+                        print(f"    Warning: Could not parse score '{score_text}'. Defaulting to 0.", file=sys.stderr)
+                        s_model = 0
 
-            adjusted_score = (100 - s_model) * math.log(safe_t_model)
-            adjusted_cost = (100 - s_model) * math.log(safe_c_total)
+                    # 4. Calculate Final Metrics
+                    t_model = response["t_model"]
+                    c_total = response["c_model"] + c_score
 
-            all_results.append({
-                "Prompt ID": prompt_id,
-                "Target Model": response["model"],
-                "Score (S_model)": s_model,
-                "Time (T_model) [s]": round(t_model, 4),
-                "Total Cost (C_total) [USD]": f"{c_total:.6f}",
-                "Adjusted Score": round(adjusted_score, 4),
-                "Adjusted Cost": round(adjusted_cost, 4),
-            })
+                    # Use floor values to prevent log(<=0)
+                    safe_t_model = max(t_model, LOG_FLOOR)
+                    safe_c_total = max(c_total, LOG_FLOOR)
+
+                    adjusted_score = (100 - s_model) * math.log(safe_t_model)
+                    adjusted_cost = (100 - s_model) * math.log(safe_c_total)
+
+                    all_results.append({
+                        "Prompt ID": prompt_id,
+                        "Target Model": response["model"],
+                        "Score (S_model)": s_model,
+                        "Time (T_model) [s]": round(t_model, 4),
+                        "Total Cost (C_total) [USD]": f"{c_total:.6f}",
+                        "Adjusted Score": round(adjusted_score, 4),
+                        "Adjusted Cost": round(adjusted_cost, 4),
+                    })
+    except FileNotFoundError:
+        print(f"Error: Prompts file not found at '{args.prompts_file}'", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}", file=sys.stderr)
+        sys.exit(1)
+
 
     # 5. Output Results
     print("\n" + "="*40)

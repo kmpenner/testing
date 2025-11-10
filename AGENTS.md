@@ -32,10 +32,10 @@ python bench_llm.py --models <model_id_1>,<model_id_2>,... <prompts_file>.jsonl
 
 ### Example
 
-Using the provided `prompts.jsonl` file and benchmarking the `google/gemini-flash-1.5` and `anthropic/claude-3.5-sonnet` models, the command would be:
+Using the provided `prompts.jsonl` file and benchmarking the `google/gemini-1.5-flash` and `anthropic/claude-3.5-sonnet` models, the command would be:
 
 ```bash
-python bench_llm.py --models "google/gemini-flash-1.5,anthropic/claude-3.5-sonnet" prompts.jsonl
+python bench_llm.py --models "google/gemini-1.5-flash,anthropic/claude-3.5-sonnet" prompts.jsonl
 ```
 
 ### Notes

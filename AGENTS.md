@@ -27,16 +27,19 @@ The script is designed to be run from the command line, with model names passed 
 ### Command Structure
 
 ```bash
-python bench_llm.py --models <model_id_1>,<model_id_2>,... <prompts_file>.jsonl
+python bench_llm.py --models <model_id_1>,... [--scoring-model <scoring_model_id>] <prompts_file>.jsonl
 ```
 
 ### Example
+
 
 Using the provided `prompts.jsonl` file and benchmarking the `google/gemini-2.5-flash-lite` and `openai/gpt-oss-120b` models, the command would be:
 
 ```bash
 python bench_llm.py --models "google/gemini-2.5-flash-lite,openai/gpt-oss-120b" prompts.jsonl
 ```
+
+If the `--scoring-model` flag is omitted, it will default to `openai/gpt-oss-120b`.
 
 ### Notes
 

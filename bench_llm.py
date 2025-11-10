@@ -148,38 +148,51 @@ def main():
 
                 # 3. Scoring Phase: Use LLM-as-a-Judge
                 for response in model_responses:
-                    print(f"  - Scoring response from: {response['model']}", file=sys.stderr)
+                    s_model = 0
+                    c_score = 0.0
 
-                    # Construct the detailed prompt for the scoring model
-                    scoring_prompt_messages = [
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are an expert evaluator. Your task is to score a model's "
-                                "response based on a given rubric. You must return ONLY the "
-                                "final numerical score and nothing else."
-                            )
-                        },
-                        {
-                            "role": "user",
-                            "content": (
-                                f"**Original Prompt:**\n{prompt_text}\n\n"
-                                f"**Scoring Rubric:**\n{scoring_rubric}\n\n"
-                                f"**Model's Response to Evaluate:**\n{response['response_text']}\n\n"
-                                "------\n"
-                                "Based on the rubric, what is the numerical score for the model's response?"
-                            )
-                        }
-                    ]
+                    # Only score if the target model's response is valid
+                    if response["response_text"] and response["response_text"] != "API_ERROR":
+                        print(f"  - Scoring response from: {response['model']}", file=sys.stderr)
 
-                    score_text, _, c_score = call_openrouter_api(SCORING_MODEL, scoring_prompt_messages, 10)
+                        # Construct the detailed prompt for the scoring model
+                        scoring_prompt_messages = [
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You are an expert evaluator. Your task is to score a model's "
+                                    "response based on a given rubric. You must return ONLY the "
+                                    "final numerical score and nothing else."
+                                )
+                            },
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"**Original Prompt:**\n{prompt_text}\n\n"
+                                    f"**Scoring Rubric:**\n{scoring_rubric}\n\n"
+                                    f"**Model's Response to Evaluate:**\n{response['response_text']}\n\n"
+                                    "------\n"
+                                    "Based on the rubric, what is the numerical score for the model's response?"
+                                )
+                            }
+                        ]
 
-                    # Extract and validate the score
-                    try:
-                        s_model = int(float(score_text))
-                    except (ValueError, TypeError):
-                        print(f"    Warning: Could not parse score '{score_text}'. Defaulting to 0.", file=sys.stderr)
-                        s_model = 0
+                        score_text, _, c_score = call_openrouter_api(SCORING_MODEL, scoring_prompt_messages, 10)
+
+                        # Check for API errors from the scoring model
+                        if score_text == "API_ERROR":
+                            print(f"    Warning: Scoring model '{SCORING_MODEL}' failed. Defaulting score to 0.", file=sys.stderr)
+                            s_model = 0
+                        else:
+                            # Extract and validate the score
+                            try:
+                                s_model = int(float(score_text))
+                            except (ValueError, TypeError):
+                                print(f"    Warning: Could not parse score '{score_text}'. Defaulting to 0.", file=sys.stderr)
+                                s_model = 0
+                    else:
+                        print(f"  - Skipping scoring for failed model: {response['model']}", file=sys.stderr)
+
 
                     # 4. Calculate Final Metrics
                     t_model = response["t_model"]

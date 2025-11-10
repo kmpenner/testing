@@ -22,7 +22,6 @@ import requests
 
 # --- Constants ---
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-SCORING_MODEL = "openai/gpt-oss-120b"
 # Floor value to prevent math errors with log(0) for time or cost
 LOG_FLOOR = 1e-6
 # Your website or app URL to identify requests
@@ -81,18 +80,29 @@ def call_openrouter_api(model_id, messages, max_tokens):
     if data.get("choices") and len(data["choices"]) > 0:
         response_text = data["choices"][0]["message"]["content"].strip()
 
-    # The OpenRouter API returns total cost under data["usage"]["cost"] (in USD).
-    # We use a comprehensive check to handle missing keys gracefully.
-    usage_data = data.get("usage", {})
-    cost = usage_data.get("cost", 0.0)
+    # Handle inconsistent 'usage' field from the OpenRouter API, which can be
+    # a dictionary (e.g., {"cost": 0.1}) or a numeric value (e.g., 0.1).
+    cost = 0.0
+    usage_field = data.get("usage")
 
-    # Fallback check for older/alternate API versions that might use total_cost
-    if cost == 0.0 and "total_cost" in usage_data:
-        cost = usage_data["total_cost"]
+    if isinstance(usage_field, dict):
+        # Case 1: usage is a dictionary, e.g., {"cost": 0.001, "completion_tokens": 100}
+        cost = usage_field.get("cost", 0.0)
+        # Fallback check for older/alternate API versions
+        if cost == 0.0 and "total_cost" in usage_field:
+            cost = usage_field.get("total_cost", 0.0)
+    elif isinstance(usage_field, (int, float)):
+        # Case 2: usage is a direct numeric value for the cost
+        cost = usage_field
 
-    # Log an error if cost is still 0 (only if tokens were used)
-    if cost == 0.0 and usage_data.get("completion_tokens", 0) > 0:
-        print(f"Warning: API returned 0 cost for model {model_id} despite generating tokens. Check API key status.", file=sys.stderr)
+    # Log a warning if cost is 0 but tokens were used.
+    # Note: token counts can appear at the top level or inside the usage dict.
+    completion_tokens = data.get("tokens_completion", 0)
+    if completion_tokens == 0 and isinstance(usage_field, dict):
+        completion_tokens = usage_field.get("completion_tokens", 0)
+
+    if cost == 0.0 and completion_tokens > 0:
+        print(f"Warning: API returned 0 cost for model {model_id} despite generating {completion_tokens} tokens. Check API key status.", file=sys.stderr)
 
     # In case the model is truly a free model, the cost remains 0.0.
 
@@ -114,12 +124,19 @@ def main():
         type=str,
         help="Path to the JSONL file containing the prompts."
     )
+    parser.add_argument(
+        "--scoring-model",
+        type=str,
+        default="openai/gpt-oss-120b",
+        help="The model ID to use for scoring the responses."
+    )
     args = parser.parse_args()
     target_models = [model.strip() for model in args.models.split(',')]
+    scoring_model = args.scoring_model
 
     print("Starting LLM Benchmark...", file=sys.stderr)
     print(f"Target Models: {target_models}", file=sys.stderr)
-    print(f"Scoring Model: {SCORING_MODEL}", file=sys.stderr)
+    print(f"Scoring Model: {scoring_model}", file=sys.stderr)
     print("-" * 20, file=sys.stderr)
 
     all_results = []
@@ -189,11 +206,11 @@ def main():
                             }
                         ]
 
-                        score_text, _, c_score = call_openrouter_api(SCORING_MODEL, scoring_prompt_messages, 10)
+                        score_text, _, c_score = call_openrouter_api(scoring_model, scoring_prompt_messages, 10)
 
                         # Check for API errors from the scoring model
                         if score_text == "API_ERROR":
-                            print(f"    Warning: Scoring model '{SCORING_MODEL}' failed. Defaulting score to 0.", file=sys.stderr)
+                            print(f"    Warning: Scoring model '{scoring_model}' failed. Defaulting score to 0.", file=sys.stderr)
                             s_model = 0
                         else:
                             # Extract and validate the score

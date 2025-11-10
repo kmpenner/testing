@@ -22,7 +22,7 @@ import requests
 
 # --- Constants ---
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-SCORING_MODEL = "openai/gpt-oss-120b"
+SCORING_MODEL = "openai/gpt-4o-mini"
 # Floor value to prevent math errors with log(0) for time or cost
 LOG_FLOOR = 1e-6
 # Your website or app URL to identify requests

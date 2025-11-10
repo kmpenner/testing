@@ -81,8 +81,20 @@ def call_openrouter_api(model_id, messages, max_tokens):
     if data.get("choices") and len(data["choices"]) > 0:
         response_text = data["choices"][0]["message"]["content"].strip()
 
-    # Extract cost from the 'usage' object if available
-    cost = data.get("usage", {}).get("total_cost", 0.0)
+    # The OpenRouter API returns total cost under data["usage"]["cost"] (in USD).
+    # We use a comprehensive check to handle missing keys gracefully.
+    usage_data = data.get("usage", {})
+    cost = usage_data.get("cost", 0.0)
+
+    # Fallback check for older/alternate API versions that might use total_cost
+    if cost == 0.0 and "total_cost" in usage_data:
+        cost = usage_data["total_cost"]
+
+    # Log an error if cost is still 0 (only if tokens were used)
+    if cost == 0.0 and usage_data.get("completion_tokens", 0) > 0:
+        print(f"Warning: API returned 0 cost for model {model_id} despite generating tokens. Check API key status.", file=sys.stderr)
+
+    # In case the model is truly a free model, the cost remains 0.0.
 
     return response_text, elapsed_time, cost
 
